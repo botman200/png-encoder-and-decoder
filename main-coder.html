@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Coordinate & Hex Encoder</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; line-height: 1.6; }
+        .box { border: 2px dashed #ccc; padding: 20px; margin-bottom: 20px; border-radius: 6px; }
+        textarea { width: 100%; height: 120px; margin: 10px 0; font-family: monospace; }
+        button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        canvas { border: 1px solid #000; margin-top: 10px; max-width: 100%; }
+        .warning { color: #856404; background-color: #fff3cd; padding: 10px; border-radius: 4px; margin-top: 5px; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+
+    <h1>Pixel Coordinate Encoder / Decoder</h1>
+
+    <!-- PART 1: ENCODE -->
+    <div class="box">
+        <h2>1. Encode Image to Pixel String</h2>
+        <input type="file" id="imageInput" accept="image/png, image/jpeg, image/webp">
+        <div class="warning">⚠️ <strong>Note:</strong> Large images will generate massive text strings and might slow down your browser. Try testing with a small image (e.g., 50x50 or 100x100 pixels) first.</div>
+        <textarea id="outputString" placeholder="Your generated pixel data string will appear here..." readonly></textarea>
+    </div>
+
+    <!-- PART 2: DECODE -->
+    <div class="box">
+        <h2>2. Decode Pixel String Back to Image</h2>
+        <textarea id="inputString" placeholder="Paste your generated pixel data string here..."></textarea>
+        <button id="decodeBtn">Reconstruct Image</button>
+        <div>
+            <h3>Result:</h3>
+            <canvas id="outputCanvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // --- PART 1: ENCODING LOGIC ---
+        document.getElementById('imageInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    // Create an off-screen canvas to read pixel data
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    
+                    // Draw image onto canvas
+                    ctx.drawImage(img, 0, 0);
+                    
+                    // Retrieve raw RGBA pixel data array
+                    const imgData = ctx.getImageData(0, 0, img.width, img.height);
+                    const data = imgData.data;
+                    
+                    let pixelTokens = [];
+                    
+                    // Loop through every single pixel row by row
+                    for (let y = 0; y < img.height; y++) {
+                        for (let x = 0; x < img.width; x++) {
+                            // Calculate the index position in the raw RGBA 1D array
+                            const index = (y * img.width + x) * 4;
+                            
+                            const r = data[index];
+                            const g = data[index + 1];
+                            const b = data[index + 2];
+                            // (data[index + 3] is Alpha/transparency, ignored here to stick strictly to Hex)
+
+                            // Convert RGB components to a standard hex string
+                            const hex = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+                            
+                            // Format: X,Y:HEX
+                            pixelTokens.push(`${x},${y}:${hex}`);
+                        }
+                    }
+                    
+                    // Join all tokens together into one massive semicolon-separated string
+                    document.getElementById('outputString').value = pixelTokens.join(';');
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // --- PART 2: DECODING LOGIC ---
+        document.getElementById('decodeBtn').addEventListener('click', function() {
+            const rawString = document.getElementById('inputString').value.trim();
+            if (!rawString) return alert("Please paste a valid pixel string first!");
+
+            // Split the huge string back into individual pixel tokens
+            const tokens = rawString.split(';');
+            
+            let maxW = 0;
+            let maxH = 0;
+            let parsedPixels = [];
+
+            // First pass: Parse coordinates to discover the boundary dimensions
+            for (let i = 0; i < tokens.length; i++) {
+                if (!tokens[i]) continue;
+                
+                // Split "X,Y" from "HEX"
+                const parts = tokens[i].split(':');
+                if (parts.length !== 2) continue;
+
+                const coords = parts[0].split(',');
+                const x = parseInt(coords[0], 10);
+                const y = parseInt(coords[1], 10);
+                const hex = parts[1];
+
+                if (x > maxW) maxW = x;
+                if (y > maxH) maxH = y;
+
+                parsedPixels.push({ x, y, hex });
+            }
+
+            // Set the canvas size based on the largest coordinates found (+1 because coords start at 0)
+            const canvas = document.getElementById('outputCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = maxW + 1;
+            canvas.height = maxH + 1;
+
+            // Clear any old drawing
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Second pass: Loop through the parsed pixels and paint them back to the screen
+            parsedPixels.forEach(pixel => {
+                ctx.fillStyle = pixel.hex;
+                // Paint a single 1x1 pixel block at the original coordinate
+                ctx.fillRect(pixel.x, pixel.y, 1, 1);
+            });
+        });
+    </script>
+</body>
+</html>
