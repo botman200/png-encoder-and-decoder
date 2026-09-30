@@ -21,7 +21,8 @@
     <!-- PART 1: ENCODE -->
     <div class="box">
         <h2>1. Encode Image to Pixel String</h2>
-        <input type="file" id="imageInput" accept="image/png, image/jpeg, image/webp">
+        <!-- Broadened accept parameter to process any standard image type -->
+        <input type="file" id="imageInput" accept="image/*">
         <textarea id="outputString" placeholder="Your generated pixel data string will appear here..." readonly></textarea>
     </div>
 
@@ -59,7 +60,6 @@
                     const imgData = ctx.getImageData(0, 0, img.width, img.height);
                     const data = imgData.data;
                     
-                    // Start string with dimensions: Width,Height|
                     let hexTokens = [`${img.width},${img.height}|`];
                     let currentChunk = "";
                     
@@ -72,9 +72,13 @@
                         const b = data[idx + 2];
                         idx += 4;
 
-                        // Fast 6-character hex conversion
-                        const hex = ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-                        currentChunk += hex + ",";
+                        // Check if the hex value can be written in shorthand 3-digit format (e.g., #ffffff -> fff)
+                        if ((r >> 4 === r & 15) && (g >> 4 === g & 15) && (b >> 4 === b & 15)) {
+                            currentChunk += ((r >> 4).toString(16) + (g >> 4).toString(16) + (b >> 4).toString(16)) + ",";
+                        } else {
+                            // Standard full 6-digit hex format
+                            currentChunk += ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1) + ",";
+                        }
 
                         if (currentChunk.length > 50000) {
                             hexTokens.push(currentChunk);
@@ -85,7 +89,7 @@
                     
                     let finalString = hexTokens.join('');
                     if (finalString.endsWith(',')) {
-                        finalString = finalString.slice(0, -1); // Trim trailing comma
+                        finalString = finalString.slice(0, -1);
                     }
                     
                     document.getElementById('outputString').value = finalString;
@@ -100,7 +104,6 @@
             const rawString = document.getElementById('inputString').value.trim();
             if (!rawString) return alert("Please paste a valid pixel string first!");
 
-            // Split dimensions from the color string
             const metaSplit = rawString.split('|');
             if (metaSplit.length !== 2) return alert("Invalid data format!");
 
@@ -119,16 +122,27 @@
             const imgData = ctx.createImageData(width, height);
             const data = imgData.data;
 
-            // Sequential extraction using RegExp to bypass heavy memory splitting arrays
-            const regex = /[0-9a-fA-F]{6}/g;
+            // Matches either a 3-character hex sequence OR a 6-character hex sequence
+            const regex = /([0-9a-fA-F]{6})|([0-9a-fA-F]{3})/g;
             let match;
             let pixelIdx = 0;
 
             while ((match = regex.exec(colorString)) !== null && pixelIdx < width * height) {
-                const num = parseInt(match[0], 16);
-                const r = (num >> 16) & 255;
-                const g = (num >> 8) & 255;
-                const b = num & 255;
+                const hexStr = match[0];
+                let r, g, b;
+
+                if (hexStr.length === 3) {
+                    // Reconstruct individual shorthand hex characters into 8-bit color channels
+                    r = parseInt(hexStr[0] + hexStr[0], 16);
+                    g = parseInt(hexStr[1] + hexStr[1], 16);
+                    b = parseInt(hexStr[2] + hexStr[2], 16);
+                } else {
+                    // Standard full 6-digit channel extraction
+                    const num = parseInt(hexStr, 16);
+                    r = (num >> 16) & 255;
+                    g = (num >> 8) & 255;
+                    b = num & 255;
+                }
 
                 const dataOffset = pixelIdx * 4;
                 data[dataOffset]     = r;
@@ -140,19 +154,15 @@
             }
 
             ctx.putImageData(imgData, 0, 0);
-            
-            // Unhide download button now that canvas has content
             document.getElementById('downloadBtn').style.display = 'inline-block';
         });
 
         // --- DOWNLOAD ACTION ---
         document.getElementById('downloadBtn').addEventListener('click', function() {
             const canvas = document.getElementById('outputCanvas');
-            
-            // Create a temporary tracking anchor element to force save download packet
             const downloadLink = document.createElement('a');
             downloadLink.download = 'decoded_image.png';
-            downloadLink.href = canvas.toDataURL('image/png');
+            downloadLink.href = canvas.toDataURL('image/png'); // Keeps high fidelity via PNG format
             
             document.body.appendChild(downloadLink);
             downloadLink.click();
