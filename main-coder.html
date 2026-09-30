@@ -2,171 +2,154 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pixel Hex Encoder / Decoder</title>
+    <title>Universal Chromebook File Packer</title>
     <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; line-height: 1.6; }
-        .box { border: 2px dashed #ccc; padding: 20px; margin-bottom: 20px; border-radius: 6px; }
-        textarea { width: 100%; height: 120px; margin: 10px 0; font-family: monospace; }
-        button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; margin-right: 10px; }
+        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; background: #f9f9f9; color: #333; }
+        .box { border: 2px dashed #bbb; padding: 30px; background: white; border-radius: 8px; text-align: center; margin-bottom: 20px; }
+        button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1em; }
         button:hover { background: #0056b3; }
-        canvas { border: 1px solid #000; margin-top: 10px; max-width: 100%; display: block; }
-        .action-row { margin-top: 10px; }
+        input[type="file"] { display: block; margin: 15px auto; }
+        .status { font-weight: bold; margin-top: 15px; color: #28a745; }
     </style>
 </head>
 <body>
 
-    <h1>Pixel Encoder / Decoder</h1>
+    <h1>Universal Chromebook Packer</h1>
 
-    <!-- PART 1: ENCODE -->
+    <!-- PACK SECTION -->
     <div class="box">
-        <h2>1. Encode Image to Pixel String</h2>
-        <!-- Broadened accept parameter to process any standard image type -->
-        <input type="file" id="imageInput" accept="image/*">
-        <textarea id="outputString" placeholder="Your generated pixel data string will appear here..." readonly></textarea>
+        <h2>1. Pack Any File(s) to Text</h2>
+        <p>Select a video, image, exe, or group of files:</p>
+        <input type="file" id="fileInput" multiple>
+        <button id="packBtn" style="display:none;">Pack to Text File</button>
+        <div id="packStatus" class="status"></div>
     </div>
 
-    <!-- PART 2: DECODE -->
+    <!-- UNPACK SECTION -->
     <div class="box">
-        <h2>2. Decode Pixel String Back to Image</h2>
-        <textarea id="inputString" placeholder="Paste your generated pixel data string here..."></textarea>
-        <div class="action-row">
-            <button id="decodeBtn">Reconstruct Image</button>
-            <button id="downloadBtn" style="background: #28a745; display: none;">Download Image</button>
-        </div>
-        <div>
-            <h3>Result:</h3>
-            <canvas id="outputCanvas"></canvas>
-        </div>
+        <h2>2. Unpack Text back to Original File(s)</h2>
+        <input type="file" id="textInput" accept=".txt">
+        <button id="unpackBtn" style="display:none;">Unpack Archive</button>
+        <div id="unpackStatus" class="status"></div>
     </div>
 
     <script>
-        // --- PART 1: ENCODING LOGIC ---
-        document.getElementById('imageInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+        let filesToPack = null;
+        let fileToUnpack = null;
 
-            const reader = new FileReader();
-            reader.onload = function(event) {
-                const img = new Image();
-                img.onload = function() {
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    
-                    ctx.drawImage(img, 0, 0);
-                    
-                    const imgData = ctx.getImageData(0, 0, img.width, img.height);
-                    const data = imgData.data;
-                    
-                    let hexTokens = [`${img.width},${img.height}|`];
-                    let currentChunk = "";
-                    
-                    let idx = 0;
-                    const totalPixels = img.width * img.height;
-                    
-                    for (let i = 0; i < totalPixels; i++) {
-                        const r = data[idx];
-                        const g = data[idx + 1];
-                        const b = data[idx + 2];
-                        idx += 4;
-
-                        // Check if the hex value can be written in shorthand 3-digit format (e.g., #ffffff -> fff)
-                        if ((r >> 4 === r & 15) && (g >> 4 === g & 15) && (b >> 4 === b & 15)) {
-                            currentChunk += ((r >> 4).toString(16) + (g >> 4).toString(16) + (b >> 4).toString(16)) + ",";
-                        } else {
-                            // Standard full 6-digit hex format
-                            currentChunk += ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1) + ",";
-                        }
-
-                        if (currentChunk.length > 50000) {
-                            hexTokens.push(currentChunk);
-                            currentChunk = "";
-                        }
-                    }
-                    hexTokens.push(currentChunk);
-                    
-                    let finalString = hexTokens.join('');
-                    if (finalString.endsWith(',')) {
-                        finalString = finalString.slice(0, -1);
-                    }
-                    
-                    document.getElementById('outputString').value = finalString;
-                };
-                img.src = event.target.result;
-            };
-            reader.readAsDataURL(file);
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            filesToPack = e.target.files;
+            document.getElementById('packBtn').style.display = filesToPack.length ? 'inline-block' : 'none';
         });
 
-        // --- PART 2: DECODING LOGIC ---
-        document.getElementById('decodeBtn').addEventListener('click', function() {
-            const rawString = document.getElementById('inputString').value.trim();
-            if (!rawString) return alert("Please paste a valid pixel string first!");
-
-            const metaSplit = rawString.split('|');
-            if (metaSplit.length !== 2) return alert("Invalid data format!");
-
-            const dims = metaSplit[0].split(',');
-            const width = parseInt(dims[0], 10);
-            const height = parseInt(dims[1], 10);
-            const colorString = metaSplit[1];
-
-            if (isNaN(width) || isNaN(height)) return alert("Invalid image dimensions!");
-
-            const canvas = document.getElementById('outputCanvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = width;
-            canvas.height = height;
-
-            const imgData = ctx.createImageData(width, height);
-            const data = imgData.data;
-
-            // Matches either a 3-character hex sequence OR a 6-character hex sequence
-            const regex = /([0-9a-fA-F]{6})|([0-9a-fA-F]{3})/g;
-            let match;
-            let pixelIdx = 0;
-
-            while ((match = regex.exec(colorString)) !== null && pixelIdx < width * height) {
-                const hexStr = match[0];
-                let r, g, b;
-
-                if (hexStr.length === 3) {
-                    // Reconstruct individual shorthand hex characters into 8-bit color channels
-                    r = parseInt(hexStr[0] + hexStr[0], 16);
-                    g = parseInt(hexStr[1] + hexStr[1], 16);
-                    b = parseInt(hexStr[2] + hexStr[2], 16);
-                } else {
-                    // Standard full 6-digit channel extraction
-                    const num = parseInt(hexStr, 16);
-                    r = (num >> 16) & 255;
-                    g = (num >> 8) & 255;
-                    b = num & 255;
-                }
-
-                const dataOffset = pixelIdx * 4;
-                data[dataOffset]     = r;
-                data[dataOffset + 1] = g;
-                data[dataOffset + 2] = b;
-                data[dataOffset + 3] = 255; // Alpha Opaque
-
-                pixelIdx++;
-            }
-
-            ctx.putImageData(imgData, 0, 0);
-            document.getElementById('downloadBtn').style.display = 'inline-block';
+        document.getElementById('textInput').addEventListener('change', (e) => {
+            fileToUnpack = e.target.files[0];
+            document.getElementById('unpackBtn').style.display = fileToUnpack ? 'inline-block' : 'none';
         });
 
-        // --- DOWNLOAD ACTION ---
-        document.getElementById('downloadBtn').addEventListener('click', function() {
-            const canvas = document.getElementById('outputCanvas');
-            const downloadLink = document.createElement('a');
-            downloadLink.download = 'decoded_image.png';
-            downloadLink.href = canvas.toDataURL('image/png'); // Keeps high fidelity via PNG format
+        // ENCODER: Compresses files to single Text payload
+        document.getElementById('packBtn').addEventListener('click', async () => {
+            const status = document.getElementById('packStatus');
+            status.innerText = "Processing files into binary stream...";
             
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            document.body.removeChild(downloadLink);
+            // Format a simple header block metadata mapping names and boundary sizes
+            let headerParts = [];
+            let fileBuffers = [];
+            
+            for (let file of filesToPack) {
+                const buf = await file.arrayBuffer();
+                headerParts.push(`${file.name}:${buf.byteLength}`);
+                fileBuffers.push(new Uint8Array(buf));
+            }
+            
+            const headerString = headerParts.join(';') + '|';
+            const headerBytes = new TextEncoder().encode(headerString);
+            
+            // Consolidate everything into a unified array allocation
+            let totalSize = headerBytes.length;
+            fileBuffers.forEach(b => totalSize += b.length);
+            
+            let masterArray = new Uint8Array(totalSize);
+            masterArray.set(headerBytes, 0);
+            
+            let offset = headerBytes.length;
+            fileBuffers.forEach(b => {
+                masterArray.set(b, offset);
+                offset += b.length;
+            });
+
+            status.innerText = "Applying compression layout layers...";
+            
+            // Compress natively via CompressionStreams API
+            const compressionStream = new Blob([masterArray]).stream().pipeThrough(new CompressionStream('gzip'));
+            const compBuffer = await new Response(compressionStream).arrayBuffer();
+            
+            // Fast Base64 compilation processing loop
+            let binary = '';
+            const bytes = new Uint8Array(compBuffer);
+            for (let i = 0; i < bytes.length; i += 0xffff) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0xffff));
+            }
+            const b64Text = btoa(binary);
+
+            // Export text file directly out to system downloads
+            const anchor = document.createElement('a');
+            anchor.href = URL.createObjectURL(new Blob([b64Text], {type: "text/plain"}));
+            anchor.download = "packed_archive.txt";
+            anchor.click();
+            status.innerText = "Done! Archive saved to your Files app Downloads folder.";
+        });
+
+        // DECODER: Unpacks Text back into distinct separate raw files
+        document.getElementById('unpackBtn').addEventListener('click', () => {
+            const status = document.getElementById('unpackStatus');
+            status.innerText = "Reading text archive properties...";
+            
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const b64Text = e.target.result.trim();
+                    const binary = atob(b64Text);
+                    const compBytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) compBytes[i] = binary.charCodeAt(i);
+                    
+                    status.innerText = "Decompressing archive components...";
+                    const decompStream = new Blob([compBytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+                    const decompBuffer = await new Response(decompStream).arrayBuffer();
+                    const masterArray = new Uint8Array(decompBuffer);
+                    
+                    // Parse original header blocks
+                    let pipelineCursor = 0;
+                    let headerString = "";
+                    while (pipelineCursor < masterArray.length) {
+                        const char = String.fromCharCode(masterArray[pipelineCursor++]);
+                        if (char === '|') break;
+                        headerString += char;
+                    }
+                    
+                    const filesMeta = headerString.split(';');
+                    filesMeta.forEach(meta => {
+                        if (!meta) return;
+                        const [name, sizeStr] = meta.split(':');
+                        const size = parseInt(sizeStr, 10);
+                        
+                        const fileBytes = masterArray.subarray(pipelineCursor, pipelineCursor + size);
+                        pipelineCursor += size;
+                        
+                        // Download the individual restored file
+                        const anchor = document.createElement('a');
+                        anchor.href = URL.createObjectURL(new Blob([fileBytes], {type: "application/octet-stream"}));
+                        anchor.download = name;
+                        anchor.click();
+                    });
+                    
+                    status.innerText = "Success! All files unpackaged individually.";
+                } catch(err) {
+                    alert("Error: Malformed file archive or text structural sequence.");
+                    status.innerText = "";
+                }
+            };
+            reader.readAsText(fileToUnpack);
         });
     </script>
 </body>
