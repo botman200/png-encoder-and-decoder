@@ -1,37 +1,37 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Universal Chromebook File Packer</title>
-    <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; background: #f9f9f9; color: #333; }
-        .box { border: 2px dashed #bbb; padding: 30px; background: white; border-radius: 8px; text-align: center; margin-bottom: 20px; }
-        button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1em; }
-        button:hover { background: #0056b3; }
-        input[type="file"] { display: block; margin: 15px auto; }
-        .status { font-weight: bold; margin-top: 15px; color: #28a745; }
-    </style>
+    <title>Universal Packer</title>
 </head>
 <body>
 
-    <h1>Universal Chromebook Packer</h1>
+    <h1>Universal Packer</h1>
+
+    <hr>
 
     <!-- PACK SECTION -->
-    <div class="box">
-        <h2>1. Pack Any File(s) to Text</h2>
-        <p>Select a video, image, exe, or group of files:</p>
-        <input type="file" id="fileInput" multiple>
-        <button id="packBtn" style="display:none;">Pack to Text File</button>
-        <div id="packStatus" class="status"></div>
-    </div>
+    <h2>1. Pack Files to Text</h2>
+    <p><strong>WARNING:</strong> Browser engine limitations cap file sizes at roughly <strong>2 GB</strong>. Do not use this section for full-length movies or massive folders over this limit.</p>
+    
+    <form>
+        <input type="file" id="fileInput" multiple><br><br>
+        <button type="button" id="packBtn" style="display:none;">Pack to Text File</button>
+    </form>
+    <p id="packStatus"></p>
+
+    <hr>
 
     <!-- UNPACK SECTION -->
-    <div class="box">
-        <h2>2. Unpack Text back to Original File(s)</h2>
-        <input type="file" id="textInput" accept=".txt">
-        <button id="unpackBtn" style="display:none;">Unpack Archive</button>
-        <div id="unpackStatus" class="status"></div>
-    </div>
+    <h2>2. Unpack Text back to Files</h2>
+    <p><strong>WARNING:</strong> Ensure the text file you load here was generated from an archive smaller than 2 GB.</p>
+    
+    <form>
+        <input type="file" id="textInput" accept=".txt"><br><br>
+        <button type="button" id="unpackBtn" style="display:none;">Unpack Archive</button>
+    </form>
+    <p id="unpackStatus"></p>
+
+    <hr>
 
     <script>
         let filesToPack = null;
@@ -39,36 +39,46 @@
 
         document.getElementById('fileInput').addEventListener('change', (e) => {
             filesToPack = e.target.files;
-            document.getElementById('packBtn').style.display = filesToPack.length ? 'inline-block' : 'none';
+            document.getElementById('packBtn').style.display = filesToPack.length ? 'inline' : 'none';
         });
 
         document.getElementById('textInput').addEventListener('change', (e) => {
-            fileToUnpack = e.target.files[0];
-            document.getElementById('unpackBtn').style.display = fileToUnpack ? 'inline-block' : 'none';
+            fileToUnpack = e.target.files;
+            document.getElementById('unpackBtn').style.display = fileToUnpack ? 'inline' : 'none';
         });
 
-        // ENCODER: Compresses files to single Text payload
+        // ENCODER
         document.getElementById('packBtn').addEventListener('click', async () => {
             const status = document.getElementById('packStatus');
-            status.innerText = "Processing files into binary stream...";
+            status.innerText = "Processing stream...";
             
-            // Format a simple header block metadata mapping names and boundary sizes
             let headerParts = [];
             let fileBuffers = [];
             
             for (let file of filesToPack) {
+                // Pre-check size limits aggressively
+                if (file.size > 2 * 1024 * 1024 * 1024) {
+                    alert(`Error: ${file.name} is too large. Choose files under 2 GB.`);
+                    status.innerText = "";
+                    return;
+                }
                 const buf = await file.arrayBuffer();
                 headerParts.push(`${file.name}:${buf.byteLength}`);
                 fileBuffers.push(new Uint8Array(buf));
             }
             
-            const headerString = headerParts.join(';') + '|';
+            const headerString = headerParts.join('透') + '型';
             const headerBytes = new TextEncoder().encode(headerString);
             
-            // Consolidate everything into a unified array allocation
             let totalSize = headerBytes.length;
             fileBuffers.forEach(b => totalSize += b.length);
             
+            if (totalSize > 2 * 1024 * 1024 * 1024) {
+                alert("Error: Total archive size exceeds the 2 GB limit.");
+                status.innerText = "";
+                return;
+            }
+
             let masterArray = new Uint8Array(totalSize);
             masterArray.set(headerBytes, 0);
             
@@ -78,13 +88,11 @@
                 offset += b.length;
             });
 
-            status.innerText = "Applying compression layout layers...";
+            status.innerText = "Compressing blocks...";
             
-            // Compress natively via CompressionStreams API
             const compressionStream = new Blob([masterArray]).stream().pipeThrough(new CompressionStream('gzip'));
             const compBuffer = await new Response(compressionStream).arrayBuffer();
             
-            // Fast Base64 compilation processing loop
             let binary = '';
             const bytes = new Uint8Array(compBuffer);
             for (let i = 0; i < bytes.length; i += 0xffff) {
@@ -92,18 +100,17 @@
             }
             const b64Text = btoa(binary);
 
-            // Export text file directly out to system downloads
             const anchor = document.createElement('a');
             anchor.href = URL.createObjectURL(new Blob([b64Text], {type: "text/plain"}));
             anchor.download = "packed_archive.txt";
             anchor.click();
-            status.innerText = "Done! Archive saved to your Files app Downloads folder.";
+            status.innerText = "Done. Exported to downloads.";
         });
 
-        // DECODER: Unpacks Text back into distinct separate raw files
+        // DECODER
         document.getElementById('unpackBtn').addEventListener('click', () => {
             const status = document.getElementById('unpackStatus');
-            status.innerText = "Reading text archive properties...";
+            status.innerText = "Reading file content...";
             
             const reader = new FileReader();
             reader.onload = async (e) => {
@@ -113,21 +120,20 @@
                     const compBytes = new Uint8Array(binary.length);
                     for (let i = 0; i < binary.length; i++) compBytes[i] = binary.charCodeAt(i);
                     
-                    status.innerText = "Decompressing archive components...";
+                    status.innerText = "Decompressing data...";
                     const decompStream = new Blob([compBytes]).stream().pipeThrough(new DecompressionStream('gzip'));
                     const decompBuffer = await new Response(decompStream).arrayBuffer();
                     const masterArray = new Uint8Array(decompBuffer);
                     
-                    // Parse original header blocks
                     let pipelineCursor = 0;
                     let headerString = "";
                     while (pipelineCursor < masterArray.length) {
                         const char = String.fromCharCode(masterArray[pipelineCursor++]);
-                        if (char === '|') break;
+                        if (char === '型') break;
                         headerString += char;
                     }
                     
-                    const filesMeta = headerString.split(';');
+                    const filesMeta = headerString.split('透');
                     filesMeta.forEach(meta => {
                         if (!meta) return;
                         const [name, sizeStr] = meta.split(':');
@@ -136,20 +142,19 @@
                         const fileBytes = masterArray.subarray(pipelineCursor, pipelineCursor + size);
                         pipelineCursor += size;
                         
-                        // Download the individual restored file
                         const anchor = document.createElement('a');
                         anchor.href = URL.createObjectURL(new Blob([fileBytes], {type: "application/octet-stream"}));
                         anchor.download = name;
                         anchor.click();
                     });
                     
-                    status.innerText = "Success! All files unpackaged individually.";
+                    status.innerText = "Success. All contents extracted.";
                 } catch(err) {
-                    alert("Error: Malformed file archive or text structural sequence.");
+                    alert("Error processing the data stream.");
                     status.innerText = "";
                 }
             };
-            reader.readAsText(fileToUnpack);
+            reader.readAsText(fileToUnpack[0]);
         });
     </script>
 </body>
