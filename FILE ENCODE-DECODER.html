@@ -1,225 +1,348 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Universal Chromebook File Packer</title>
-    <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; background: #f9f9f9; color: #333; }
-        .box { border: 2px dashed #bbb; padding: 30px; background: white; border-radius: 8px; text-align: center; margin-bottom: 20px; }
-        button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1em; }
-        button:hover { background: #0056b3; }
-        input[type="file"], select, input[type="text"] { display: block; margin: 15px auto; padding: 8px; box-sizing: border-box; }
-        input[type="text"] { width: 60%; max-width: 300px; border: 1px solid #ccc; border-radius: 4px; }
-        .status { font-weight: bold; margin-top: 15px; color: #28a745; }
-    </style>
+<meta charset="UTF-8">
+<title>Packer</title>
+<style>
+body {
+  font-family: sans-serif;
+  max-width: 500px;
+  margin: 20px auto;
+  padding: 0 10px;
+  background: #f9f9f9;
+}
+.box {
+  border: 2px dashed #bbb;
+  padding: 20px;
+  background: #fff;
+  border-radius: 8px;
+  text-align: center;
+  margin-bottom: 20px;
+  word-wrap: break-word;
+}
+button {
+  background: #007bff;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+input, select {
+  display: block;
+  margin: 10px auto;
+  padding: 8px;
+  width: 80%;
+}
+.status {
+  font-weight: bold;
+  margin-top: 10px;
+  color: #28a745;
+}
+.file-list {
+  text-align: left;
+  background: #eee;
+  padding: 10px;
+  max-height: 120px;
+  overflow-y: auto;
+  display: none;
+}
+</style>
 </head>
 <body>
 
-    <h1>Universal Chromebook Packer</h1>
+<h1>Packer</h1>
 
-    <!-- PACK SECTION -->
-    <div class="box">
-        <h2>1. Pack Any File(s) or Folders to Text</h2>
-        <p>Select what you want to pack:</p>
+<div class="box">
+<h2>1. Pack</h2>
+<input type="file"
+  id="fileInput"
+  multiple>
+<div id="listCont"
+  class="file-list">
+  <ul id="list"></ul>
+</div>
+<input type="text"
+  id="nameIn"
+  placeholder="Name">
+<input type="password"
+  id="passIn"
+  placeholder="Password">
+<button id="packBtn"
+  style="display:none;"
+  >Pack to Text</button>
+<div id="pStatus"
+  class="status"></div>
+</div>
+
+<div class="box">
+<h2>2. Unpack</h2>
+<input type="file"
+  id="textIn"
+  accept=".txt">
+<input type="password"
+  id="uPassIn"
+  placeholder="Password">
+<button id="unpackBtn"
+  style="display:none;"
+  >Unpack Files</button>
+<div id="uStatus"
+  class="status"></div>
+</div>
+
+<script>
+let fToPack = null;
+let fToUnpack = null;
+const fIn = document.getElementById(
+  'fileInput'
+);
+const lCont = document.getElementById(
+  'listCont'
+);
+const list = document.getElementById(
+  'list'
+);
+const pBtn = document.getElementById(
+  'packBtn'
+);
+
+fIn.addEventListener(
+  'change',
+  (e) => {
+    fToPack = e.target.files;
+    list.innerHTML = '';
+    if (fToPack && fToPack.length > 0) {
+      lCont.style.display = 'block';
+      pBtn.style.display = 'inline-block';
+      for (let f of fToPack) {
+        const li = document.createElement(
+          'li'
+        );
+        const mb = (
+          f.size / 1024 / 1024
+        ).toFixed(2);
+        li.innerText = (
+          f.name + ' (' + mb + ' MB)'
+        );
+        list.appendChild(li);
+      }
+    } else {
+      lCont.style.display = 'none';
+      pBtn.style.display = 'none';
+    }
+  }
+);
+
+document.getElementById('textIn')
+.addEventListener(
+  'change',
+  (e) => {
+    fToUnpack = e.target.files;
+    const upBtn = document.getElementById(
+      'unpackBtn'
+    );
+    upBtn.style.display = fToUnpack
+      ? 'inline-block' : 'none';
+  }
+);
+
+function toB64(blob) {
+  return new Promise((res) => {
+    const r = new FileReader();
+    r.onloadend = () => {
+      const idx = (
+        r.result.indexOf(',') + 1
+      );
+      res(r.result.substring(idx));
+    };
+    r.readAsDataURL(blob);
+  });
+}
+
+function xor(bytes, pass) {
+  if (!pass) return bytes;
+  const pB = new TextEncoder()
+    .encode(pass);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] ^= pB[i % pB.length];
+  }
+  return bytes;
+}
+
+pBtn.addEventListener(
+  'click',
+  async () => {
+    const st = document.getElementById(
+      'pStatus'
+    );
+    st.innerText = 'Packing...';
+    let entries = [];
+    let pSize = 0;
+    
+    for (let f of fToPack) {
+      const buf = await f.arrayBuffer();
+      const fB = new Uint8Array(buf);
+      const nB = new TextEncoder()
+        .encode(f.name);
+      entries.push({
+        nB: nB, fB: fB, sz: fB.length
+      });
+      pSize += (
+        4 + nB.length + 4 + fB.length
+      );
+    }
+    
+    let mArr = new Uint8Array(4 + pSize);
+    let v = new DataView(mArr.buffer);
+    v.setUint32(0, entries.length, false);
+    let out = 4;
+    
+    for (let e of entries) {
+      v.setUint32(out, e.nB.length, false);
+      out += 4;
+      mArr.set(e.nB, out);
+      out += e.nB.length;
+      v.setUint32(out, e.sz, false);
+      out += 4;
+      mArr.set(e.fB, out);
+      out += e.sz;
+    }
+
+    st.innerText = 'Compressing...';
+    const bl = new Blob([mArr]);
+    const cStr = bl.stream().pipeThrough(
+      new CompressionStream('deflate')
+    );
+    const cBuf = await new Response(cStr)
+      .arrayBuffer();
+    let cBytes = new Uint8Array(cBuf);
+
+    const pwd = document.getElementById(
+      'passIn'
+    ).value;
+    if (pwd) {
+      st.innerText = 'Encrypting...';
+      cBytes = xor(cBytes, pwd);
+    }
+    
+    st.innerText = 'Converting...';
+    const cBl = new Blob([cBytes]);
+    const b64 = await toB64(cBl);
+
+    let rNm = document.getElementById(
+      'nameIn'
+    ).value;
+    let cNm = rNm.trim().replace(
+      /[\\/:*?"<>|]/g, ""
+    ); 
+    if (!cNm) cNm = "archive";
+    if (!cNm.endsWith(".txt")) {
+      cNm += ".txt";
+    }
+
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(
+      new Blob(
+        [b64], {type: "text/plain"}
+      )
+    );
+    a.download = cNm;
+    a.click();
+    st.innerText = 'Saved: ' + cNm;
+  }
+);
+
+document.getElementById('unpackBtn')
+.addEventListener(
+  'click',
+  () => {
+    const st = document.getElementById(
+      'uStatus'
+    );
+    st.innerText = 'Reading...';
+    const r = new FileReader();
+    r.onload = async (e) => {
+      try {
+        const b64 = e.target.result.trim();
+        st.innerText = 'Decoding...';
+        const url = (
+          'data:application/' +
+          'octet-stream;base64,' + b64
+        );
+        const res = await fetch(url);
+        const cBuf = await res.arrayBuffer();
+        let cBytes = new Uint8Array(cBuf);
         
-        <select id="uploadType">
-            <option value="files">Individual File(s)</option>
-            <option value="folder">An Entire Folder</option>
-        </select>
-
-        <div id="pickerContainer">
-            <!-- Separated static input elements to completely avoid browser memory setting lockups -->
-            <input type="file" id="fileInput" multiple>
-            <input type="file" id="folderInput" webkitdirectory directory style="display: none;">
-        </div>
-
-        <input type="text" id="archiveNameInput" placeholder="Custom Archive Name (Optional)" accept-charset="UTF-8">
-
-        <button id="packBtn" style="display:none;">Pack to Text File</button>
-        <div id="packStatus" class="status"></div>
-    </div>
-
-    <!-- UNPACK SECTION -->
-    <div class="box">
-        <h2>2. Unpack Text back to Original File(s)</h2>
-        <input type="file" id="textInput" accept=".txt">
-        <button id="unpackBtn" style="display:none;">Unpack Archive</button>
-        <div id="unpackStatus" class="status"></div>
-    </div>
-
-    <script>
-        let filesToPack = null;
-        let fileToUnpack = null;
-
-        const uploadType = document.getElementById('uploadType');
-        const fileInput = document.getElementById('fileInput');
-        const folderInput = document.getElementById('folderInput');
-        const packBtn = document.getElementById('packBtn');
-
-        // Toggle visibility between separate elements to reset picker logic safely
-        uploadType.addEventListener('change', function(e) {
-            filesToPack = null;
-            packBtn.style.display = 'none';
-            fileInput.value = '';
-            folderInput.value = '';
-
-            if (e.target.value === 'folder') {
-                fileInput.style.display = 'none';
-                folderInput.style.display = 'block';
-            } else {
-                fileInput.style.display = 'block';
-                folderInput.style.display = 'none';
-            }
-        });
-
-        function handleFileSelection(e) {
-            filesToPack = e.target.files;
-            packBtn.style.display = filesToPack && filesToPack.length ? 'inline-block' : 'none';
+        const pwd = document.getElementById(
+          'uPassIn'
+        ).value;
+        if (pwd) {
+          st.innerText = 'Decrypting...';
+          cBytes = xor(cBytes, pwd);
         }
 
-        fileInput.addEventListener('change', handleFileSelection);
-        folderInput.addEventListener('change', handleFileSelection);
-
-        document.getElementById('textInput').addEventListener('change', (e) => {
-            fileToUnpack = e.target.files;
-            document.getElementById('unpackBtn').style.display = fileToUnpack ? 'inline-block' : 'none';
-        });
-
-        function bytesToBase64Native(blob) {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const splitIndex = reader.result.indexOf(',') + 1;
-                    resolve(reader.result.substring(splitIndex));
-                };
-                reader.readAsDataURL(blob);
-            });
+        st.innerText = 'Decompressing...';
+        const bl = new Blob([cBytes]);
+        const dStr = bl.stream().pipeThrough(
+          new DecompressionStream(
+            'deflate'
+          )
+        );
+        const dBuf = await new Response(
+          dStr
+        ).arrayBuffer();
+        const mArr = new Uint8Array(dBuf);
+        let v = new DataView(mArr.buffer);
+        
+        const fCount = v.getUint32(
+          0, false
+        );
+        let out = 4;
+        st.innerText = 'Extracting...';
+        
+        for (let i = 0; i < fCount; i++) {
+          const nLen = v.getUint32(
+            out, false
+          );
+          out += 4;
+          const nB = mArr.subarray(
+            out, out + nLen
+          );
+          const name = new TextDecoder()
+            .decode(nB);
+          out += nLen;
+          const fLen = v.getUint32(
+            out, false
+          );
+          out += 4;
+          const fB = mArr.subarray(
+            out, out + fLen
+          );
+          out += fLen;
+          
+          const a = document.createElement(
+            'a'
+          );
+          a.href = URL.createObjectURL(
+            new Blob(
+              [fB], {
+                type: 'application/' +
+                'octet-stream'
+              }
+            )
+          );
+          a.download = name;
+          a.click();
         }
-
-        // ENCODER
-        packBtn.addEventListener('click', async () => {
-            const status = document.getElementById('packStatus');
-            status.innerText = "Processing selection into binary stream...";
-            
-            let fileEntries = [];
-            let totalPayloadSize = 0;
-            
-            for (let file of filesToPack) {
-                const buf = await file.arrayBuffer();
-                const fileBytes = new Uint8Array(buf);
-                
-                const structuralPath = file.webkitRelativePath || file.name;
-                const pathBytes = new TextEncoder().encode(structuralPath);
-                
-                fileEntries.push({
-                    pathBytes: pathBytes,
-                    fileBytes: fileBytes,
-                    size: fileBytes.length
-                });
-                
-                totalPayloadSize += 4 + pathBytes.length + 4 + fileBytes.length;
-            }
-            
-            let masterArray = new Uint8Array(4 + totalPayloadSize);
-            let view = new DataView(masterArray.buffer);
-            
-            view.setUint32(0, fileEntries.length, false);
-            let offset = 4;
-            
-            for (let entry of fileEntries) {
-                view.setUint32(offset, entry.pathBytes.length, false);
-                offset += 4;
-                
-                masterArray.set(entry.pathBytes, offset);
-                offset += entry.pathBytes.length;
-                
-                view.setUint32(offset, entry.size, false);
-                offset += 4;
-                
-                masterArray.set(entry.fileBytes, offset);
-                offset += entry.size;
-            }
-
-            status.innerText = "Compressing archive chunks (Max Deflate)...";
-            
-            const compressionStream = new Blob([masterArray]).stream().pipeThrough(new CompressionStream('deflate'));
-            const compBuffer = await new Response(compressionStream).arrayBuffer();
-            
-            status.innerText = "Converting bytes to text stream safely...";
-            
-            const compressedBlob = new Blob([compBuffer]);
-            const b64Text = await bytesToBase64Native(compressedBlob);
-
-            let customName = document.getElementById('archiveNameInput').value.trim();
-            customName = customName.replace(/[\\/:*?"<>|]/g, ""); 
-            if (!customName) {
-                customName = "packed_archive";
-            }
-            if (!customName.endsWith(".txt")) {
-                customName += ".txt";
-            }
-
-            const anchor = document.createElement('a');
-            anchor.href = URL.createObjectURL(new Blob([b64Text], {type: "text/plain"}));
-            anchor.download = customName;
-            anchor.click();
-            status.innerText = `Done! Saved as "${customName}" to your Downloads.`;
-        });
-
-        // DECODER
-        document.getElementById('unpackBtn').addEventListener('click', () => {
-            const status = document.getElementById('unpackStatus');
-            status.innerText = "Reading text archive properties...";
-            
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    const b64Text = e.target.result.trim();
-                    
-                    status.innerText = "Decoding text format natively...";
-                    const res = await fetch(`data:application/octet-stream;base64,${b64Text}`);
-                    const compBuffer = await res.arrayBuffer();
-                    const compBytes = new Uint8Array(compBuffer);
-                    
-                    status.innerText = "Decompressing archive components...";
-                    const decompStream = new Blob([compBytes]).stream().pipeThrough(new DecompressionStream('deflate'));
-                    const decompBuffer = await new Response(decompStream).arrayBuffer();
-                    const masterArray = new Uint8Array(decompBuffer);
-                    let view = new DataView(masterArray.buffer);
-                    
-                    const fileCount = view.getUint32(0, false);
-                    let offset = 4;
-                    
-                    status.innerText = "Extracting contents to your machine...";
-                    
-                    for (let i = 0; i < fileCount; i++) {
-                        const pathLen = view.getUint32(offset, false);
-                        offset += 4;
-                        
-                        const pathBytes = masterArray.subarray(offset, offset + pathLen);
-                        const structuralPath = new TextDecoder().decode(pathBytes);
-                        offset += pathLen;
-                        
-                        const fileLen = view.getUint32(offset, false);
-                        offset += 4;
-                        
-                        const fileBytes = masterArray.subarray(offset, offset + fileLen);
-                        offset += fileLen;
-                        
-                        const anchor = document.createElement('a');
-                        anchor.href = URL.createObjectURL(new Blob([fileBytes], {type: "application/octet-stream"}));
-                        anchor.download = structuralPath;
-                        anchor.click();
-                    }
-                    
-                    status.innerText = "Success! Archive completely unpacked.";
-                } catch(err) {
-                    alert("Error processing the data stream.");
-                    status.innerText = "";
-                }
-            };
-            reader.readAsText(fileToUnpack);
-        });
-    </script>
+        st.innerText = 'Unpacked!';
+      } catch(err) {
+        alert('Check password/file.');
+        st.innerText = '';
+      }
+    };
+    r.readAsText(fToUnpack[0]);
+  }
+);
+</script>
 </body>
 </html>
