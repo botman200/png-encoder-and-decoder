@@ -3,50 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>jax image coderr</title>
+    <title>Pixel Hex Encoder / Decoder</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 20px auto; padding: 0 20px; color: #333; line-height: 1.5; }
-        .box { background: #f8f9fa; border: 1px solid #e9ecef; padding: 24px; margin-bottom: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        textarea { width: 100%; height: 140px; margin: 12px 0; font-family: monospace; font-size: 12px; box-sizing: border-box; padding: 10px; border: 1px solid #ced4da; border-radius: 4px; }
-        button { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-        button:hover { background: #218838; }
-        .status { font-weight: bold; margin-top: 8px; color: #495057; }
-        canvas { border: 1px solid #dee2e6; margin-top: 15px; max-width: 100%; background: #fff; }
-        .info-banner { background-color: #e2f0d9; color: #385723; padding: 12px; border-radius: 4px; margin-bottom: 15px; font-size: 0.95em; }
+        body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; line-height: 1.6; }
+        .box { border: 2px dashed #ccc; padding: 20px; margin-bottom: 20px; border-radius: 6px; }
+        textarea { width: 100%; height: 120px; margin: 10px 0; font-family: monospace; }
+        button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; margin-right: 10px; }
+        button:hover { background: #0056b3; }
+        canvas { border: 1px solid #000; margin-top: 10px; max-width: 100%; display: block; }
+        .action-row { margin-top: 10px; }
     </style>
 </head>
 <body>
 
-    <h1>Streamlined Pixel Coordinate Encoder & Decoder</h1>
+    <h1>Pixel Encoder / Decoder</h1>
 
-    <!-- ENCODE SECTION -->
+    <!-- PART 1: ENCODE -->
     <div class="box">
-        <h2>1. Encode Image to String</h2>
+        <h2>1. Encode Image to Pixel String</h2>
         <input type="file" id="imageInput" accept="image/png, image/jpeg, image/webp">
-        <div id="encodeStatus" class="status"></div>
-        <textarea id="outputString" placeholder="Your generated string will appear here..." readonly></textarea>
+        <textarea id="outputString" placeholder="Your generated pixel data string will appear here..." readonly></textarea>
     </div>
 
-    <!-- DECODE SECTION -->
+    <!-- PART 2: DECODE -->
     <div class="box">
-        <h2>2. Decode String back to Canvas</h2>
-        <textarea id="inputString" placeholder="Paste your coordinate string here..."></textarea>
-        <button id="decodeBtn">Reconstruct Image Buffer</button>
-        <div id="decodeStatus" class="status"></div>
+        <h2>2. Decode Pixel String Back to Image</h2>
+        <textarea id="inputString" placeholder="Paste your generated pixel data string here..."></textarea>
+        <div class="action-row">
+            <button id="decodeBtn">Reconstruct Image</button>
+            <button id="downloadBtn" style="background: #28a745; display: none;">Download Image</button>
+        </div>
         <div>
+            <h3>Result:</h3>
             <canvas id="outputCanvas"></canvas>
         </div>
     </div>
 
     <script>
-        // --- HIGH PERFORMANCE ENCODER ---
+        // --- PART 1: ENCODING LOGIC ---
         document.getElementById('imageInput').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
 
-            const encodeStatus = document.getElementById('encodeStatus');
-            encodeStatus.innerText = "Processing image...";
-            
             const reader = new FileReader();
             reader.onload = function(event) {
                 const img = new Image();
@@ -55,121 +53,110 @@
                     const ctx = canvas.getContext('2d');
                     canvas.width = img.width;
                     canvas.height = img.height;
+                    
                     ctx.drawImage(img, 0, 0);
                     
                     const imgData = ctx.getImageData(0, 0, img.width, img.height);
                     const data = imgData.data;
                     
-                    // Pre-allocate array capacity hints to prevent dynamic resizing overhead
-                    let outputChunks = [];
+                    // Start string with dimensions: Width,Height|
+                    let hexTokens = [`${img.width},${img.height}|`];
                     let currentChunk = "";
-                    const chunkSize = 50000; 
-
+                    
                     let idx = 0;
-                    for (let y = 0; y < img.height; y++) {
-                        for (let x = 0; x < img.width; x++) {
-                            const r = data[idx];
-                            const g = data[idx + 1];
-                            const b = data[idx + 2];
-                            idx += 4; // Advance directly to next pixel array offset
+                    const totalPixels = img.width * img.height;
+                    
+                    for (let i = 0; i < totalPixels; i++) {
+                        const r = data[idx];
+                        const g = data[idx + 1];
+                        const b = data[idx + 2];
+                        idx += 4;
 
-                            // Fast hex generation using bitwise operators
-                            const hex = ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-                            
-                            currentChunk += `${x},${y}:${hex};`;
+                        // Fast 6-character hex conversion
+                        const hex = ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+                        currentChunk += hex + ",";
 
-                            // Safely append string fragments periodically to minimize heavy string allocations
-                            if (currentChunk.length > chunkSize) {
-                                outputChunks.push(currentChunk);
-                                currentChunk = "";
-                            }
+                        if (currentChunk.length > 50000) {
+                            hexTokens.push(currentChunk);
+                            currentChunk = "";
                         }
                     }
-                    outputChunks.push(currentChunk);
+                    hexTokens.push(currentChunk);
                     
-                    // Final string concatenation
-                    let finalString = outputChunks.join('');
-                    if (finalString.endsWith(';')) {
-                        finalString = finalString.slice(0, -1); // Trim trailing semicolon
+                    let finalString = hexTokens.join('');
+                    if (finalString.endsWith(',')) {
+                        finalString = finalString.slice(0, -1); // Trim trailing comma
                     }
-
+                    
                     document.getElementById('outputString').value = finalString;
-                    encodeStatus.innerText = `Done! Encoded ${img.width}x${img.height} (${img.width * img.height} total pixels). String length: ${finalString.length.toLocaleString()} characters.`;
                 };
                 img.src = event.target.result;
             };
             reader.readAsDataURL(file);
         });
 
-        // --- HIGH PERFORMANCE DECODER ---
+        // --- PART 2: DECODING LOGIC ---
         document.getElementById('decodeBtn').addEventListener('click', function() {
             const rawString = document.getElementById('inputString').value.trim();
-            if (!rawString) return alert("Please paste data first!");
+            if (!rawString) return alert("Please paste a valid pixel string first!");
 
-            const decodeStatus = document.getElementById('decodeStatus');
-            decodeStatus.innerText = "Scanning data boundaries...";
+            // Split dimensions from the color string
+            const metaSplit = rawString.split('|');
+            if (metaSplit.length !== 2) return alert("Invalid data format!");
 
-            // Match coordinates using a standard sequential global RegExp tracker
-            // This reads values directly without splitting the string out into a giant array
-            const regex = /(\d+),(\d+):([0-9a-fA-F]{6})/g;
-            
-            let maxW = 0;
-            let maxH = 0;
-            let match;
+            const dims = metaSplit[0].split(',');
+            const width = parseInt(dims[0], 10);
+            const height = parseInt(dims[1], 10);
+            const colorString = metaSplit[1];
 
-            // First rapid pass: determine canvas dimensions natively
-            while ((match = regex.exec(rawString)) !== null) {
-                const x = parseInt(match[1], 10);
-                const y = parseInt(match[2], 10);
-                if (x > maxW) maxW = x;
-                if (y > maxH) maxH = y;
-            }
-
-            const width = maxW + 1;
-            const height = maxH + 1;
-
-            if (width === 1 && height === 1) {
-                decodeStatus.innerText = "Error: No valid coordinate tokens found.";
-                return;
-            }
+            if (isNaN(width) || isNaN(height)) return alert("Invalid image dimensions!");
 
             const canvas = document.getElementById('outputCanvas');
             const ctx = canvas.getContext('2d');
             canvas.width = width;
             canvas.height = height;
 
-            // Create a blank image buffer to manipulate raw pixels directly in RAM
             const imgData = ctx.createImageData(width, height);
             const data = imgData.data;
 
-            decodeStatus.innerText = "Reconstructing unified pixel buffer...";
-            
-            // Reset regular expression index tracker for the second pass
-            regex.lastIndex = 0;
+            // Sequential extraction using RegExp to bypass heavy memory splitting arrays
+            const regex = /[0-9a-fA-F]{6}/g;
+            let match;
+            let pixelIdx = 0;
 
-            // Second pass: Parse data values directly into the binary array structure
-            while ((match = regex.exec(rawString)) !== null) {
-                const x = parseInt(match[1], 10);
-                const y = parseInt(match[2], 10);
-                const hexStr = match[3];
-
-                // Parse the 6-character hex string into integer channels natively
-                const num = parseInt(hexStr, 16);
+            while ((match = regex.exec(colorString)) !== null && pixelIdx < width * height) {
+                const num = parseInt(match[0], 16);
                 const r = (num >> 16) & 255;
                 const g = (num >> 8) & 255;
                 const b = num & 255;
 
-                // Calculate accurate index mapping for standard 1D Uint8ClampedArray 
-                const pixelIndex = (y * width + x) * 4;
-                data[pixelIndex]     = r;   // Red
-                data[pixelIndex + 1] = g;   // Green
-                data[pixelIndex + 2] = b;   // Blue
-                data[pixelIndex + 3] = 255; // Alpha (Opaque)
+                const dataOffset = pixelIdx * 4;
+                data[dataOffset]     = r;
+                data[dataOffset + 1] = g;
+                data[dataOffset + 2] = b;
+                data[dataOffset + 3] = 255; // Alpha Opaque
+
+                pixelIdx++;
             }
 
-            // Write the complete parsed data chunk back to screen canvas natively in one single blast
             ctx.putImageData(imgData, 0, 0);
-            decodeStatus.innerText = `Success! Rendered fully functional ${width}x${height} viewport image.`;
+            
+            // Unhide download button now that canvas has content
+            document.getElementById('downloadBtn').style.display = 'inline-block';
+        });
+
+        // --- DOWNLOAD ACTION ---
+        document.getElementById('downloadBtn').addEventListener('click', function() {
+            const canvas = document.getElementById('outputCanvas');
+            
+            // Create a temporary tracking anchor element to force save download packet
+            const downloadLink = document.createElement('a');
+            downloadLink.download = 'decoded_image.png';
+            downloadLink.href = canvas.toDataURL('image/png');
+            
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
         });
     </script>
 </body>
