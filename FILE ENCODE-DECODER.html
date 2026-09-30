@@ -28,10 +28,11 @@
         </select>
 
         <div id="pickerContainer">
+            <!-- Separated static input elements to completely avoid browser memory setting lockups -->
             <input type="file" id="fileInput" multiple>
+            <input type="file" id="folderInput" webkitdirectory directory style="display: none;">
         </div>
 
-        <!-- NEW FEATURE: Rename output text file field -->
         <input type="text" id="archiveNameInput" placeholder="Custom Archive Name (Optional)" accept-charset="UTF-8">
 
         <button id="packBtn" style="display:none;">Pack to Text File</button>
@@ -50,34 +51,34 @@
         let filesToPack = null;
         let fileToUnpack = null;
 
-        document.getElementById('uploadType').addEventListener('change', function(e) {
-            const container = document.getElementById('pickerContainer');
-            container.innerHTML = ''; 
-            
-            const newInput = document.createElement('input');
-            newInput.type = 'file';
-            newInput.id = 'fileInput';
-            
-            if (e.target.value === 'folder') {
-                newInput.setAttribute('webkitdirectory', '');
-                newInput.setAttribute('directory', '');
-            } else {
-                newInput.setAttribute('multiple', '');
-            }
-            
-            newInput.addEventListener('change', handleFileSelection);
-            container.appendChild(newInput);
-            
+        const uploadType = document.getElementById('uploadType');
+        const fileInput = document.getElementById('fileInput');
+        const folderInput = document.getElementById('folderInput');
+        const packBtn = document.getElementById('packBtn');
+
+        // Toggle visibility between separate elements to reset picker logic safely
+        uploadType.addEventListener('change', function(e) {
             filesToPack = null;
-            document.getElementById('packBtn').style.display = 'none';
+            packBtn.style.display = 'none';
+            fileInput.value = '';
+            folderInput.value = '';
+
+            if (e.target.value === 'folder') {
+                fileInput.style.display = 'none';
+                folderInput.style.display = 'block';
+            } else {
+                fileInput.style.display = 'block';
+                folderInput.style.display = 'none';
+            }
         });
 
         function handleFileSelection(e) {
             filesToPack = e.target.files;
-            document.getElementById('packBtn').style.display = filesToPack.length ? 'inline-block' : 'none';
+            packBtn.style.display = filesToPack && filesToPack.length ? 'inline-block' : 'none';
         }
 
-        document.getElementById('fileInput').addEventListener('change', handleFileSelection);
+        fileInput.addEventListener('change', handleFileSelection);
+        folderInput.addEventListener('change', handleFileSelection);
 
         document.getElementById('textInput').addEventListener('change', (e) => {
             fileToUnpack = e.target.files;
@@ -96,7 +97,7 @@
         }
 
         // ENCODER
-        document.getElementById('packBtn').addEventListener('click', async () => {
+        packBtn.addEventListener('click', async () => {
             const status = document.getElementById('packStatus');
             status.innerText = "Processing selection into binary stream...";
             
@@ -149,9 +150,8 @@
             const compressedBlob = new Blob([compBuffer]);
             const b64Text = await bytesToBase64Native(compressedBlob);
 
-            // Read the custom name from input field, remove invalid file characters, fallback if blank
             let customName = document.getElementById('archiveNameInput').value.trim();
-            customName = customName.replace(/[\\/:*?"<>|]/g, ""); // sanitize filename
+            customName = customName.replace(/[\\/:*?"<>|]/g, ""); 
             if (!customName) {
                 customName = "packed_archive";
             }
