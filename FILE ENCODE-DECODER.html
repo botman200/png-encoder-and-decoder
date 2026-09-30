@@ -18,9 +18,10 @@
 
     <!-- PACK SECTION -->
     <div class="box">
-        <h2>1. Pack Any File(s) to Text</h2>
-        <p>Select a video, image, exe, or group of files:</p>
-        <input type="file" id="fileInput" multiple>
+        <h2>1. Pack Any File(s) or Folders to Text</h2>
+        <p>Select a video, image, exe, text asset, or an entire folder:</p>
+        <!-- UPGRADED: Added webkitdirectory and directory to capture full folder structures -->
+        <input type="file" id="fileInput" multiple webkitdirectory directory>
         <button id="packBtn" style="display:none;">Pack to Text File</button>
         <div id="packStatus" class="status"></div>
     </div>
@@ -43,64 +44,85 @@
         });
 
         document.getElementById('textInput').addEventListener('change', (e) => {
-            fileToUnpack = e.target.files[0];
+            fileToUnpack = e.target.files;
             document.getElementById('unpackBtn').style.display = fileToUnpack ? 'inline-block' : 'none';
         });
 
-        // ENCODER: Compresses files to single Text payload
+        // Crash-proof native conversion using browser background streams
+        function bytesToBase64Native(blob) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const splitIndex = reader.result.indexOf(',') + 1;
+                    resolve(reader.result.substring(splitIndex));
+                };
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        // ENCODER
         document.getElementById('packBtn').addEventListener('click', async () => {
             const status = document.getElementById('packStatus');
-            status.innerText = "Processing files into binary stream...";
+            status.innerText = "Processing folder layout into binary stream...";
             
-            // Format a simple header block metadata mapping names and boundary sizes
-            let headerParts = [];
-            let fileBuffers = [];
+            let fileEntries = [];
+            let totalPayloadSize = 0;
             
             for (let file of filesToPack) {
                 const buf = await file.arrayBuffer();
-                headerParts.push(`${file.name}:${buf.byteLength}`);
-                fileBuffers.push(new Uint8Array(buf));
+                const fileBytes = new Uint8Array(buf);
+                
+                // UPGRADED: Uses webkitRelativePath to capture full folders, falls back to name for single files
+                const structuralPath = file.webkitRelativePath || file.name;
+                const pathBytes = new TextEncoder().encode(structuralPath);
+                
+                fileEntries.push({
+                    pathBytes: pathBytes,
+                    fileBytes: fileBytes,
+                    size: fileBytes.length
+                });
+                
+                totalPayloadSize += 4 + pathBytes.length + 4 + fileBytes.length;
             }
             
-            const headerString = headerParts.join(';') + '|';
-            const headerBytes = new TextEncoder().encode(headerString);
+            let masterArray = new Uint8Array(4 + totalPayloadSize);
+            let view = new DataView(masterArray.buffer);
             
-            // Consolidate everything into a unified array allocation
-            let totalSize = headerBytes.length;
-            fileBuffers.forEach(b => totalSize += b.length);
+            view.setUint32(0, fileEntries.length, false);
+            let offset = 4;
             
-            let masterArray = new Uint8Array(totalSize);
-            masterArray.set(headerBytes, 0);
-            
-            let offset = headerBytes.length;
-            fileBuffers.forEach(b => {
-                masterArray.set(b, offset);
-                offset += b.length;
-            });
+            for (let entry of fileEntries) {
+                view.setUint32(offset, entry.pathBytes.length, false);
+                offset += 4;
+                
+                masterArray.set(entry.pathBytes, offset);
+                offset += entry.pathBytes.length;
+                
+                view.setUint32(offset, entry.size, false);
+                offset += 4;
+                
+                masterArray.set(entry.fileBytes, offset);
+                offset += entry.size;
+            }
 
-            status.innerText = "Applying compression layout layers...";
+            status.innerText = "Compressing archive chunks (Max Deflate)...";
             
-            // Compress natively via CompressionStreams API
-            const compressionStream = new Blob([masterArray]).stream().pipeThrough(new CompressionStream('gzip'));
+            const compressionStream = new Blob([masterArray]).stream().pipeThrough(new CompressionStream('deflate'));
             const compBuffer = await new Response(compressionStream).arrayBuffer();
             
-            // Fast Base64 compilation processing loop
-            let binary = '';
-            const bytes = new Uint8Array(compBuffer);
-            for (let i = 0; i < bytes.length; i += 0xffff) {
-                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0xffff));
-            }
-            const b64Text = btoa(binary);
+            status.innerText = "Converting bytes to text stream safely...";
+            
+            const compressedBlob = new Blob([compBuffer]);
+            const b64Text = await bytesToBase64Native(compressedBlob);
 
-            // Export text file directly out to system downloads
             const anchor = document.createElement('a');
             anchor.href = URL.createObjectURL(new Blob([b64Text], {type: "text/plain"}));
             anchor.download = "packed_archive.txt";
             anchor.click();
-            status.innerText = "Done! Archive saved to your Files app Downloads folder.";
+            status.innerText = "Done! Folder archive saved to your Downloads.";
         });
 
-        // DECODER: Unpacks Text back into distinct separate raw files
+        // DECODER
         document.getElementById('unpackBtn').addEventListener('click', () => {
             const status = document.getElementById('unpackStatus');
             status.innerText = "Reading text archive properties...";
@@ -109,43 +131,48 @@
             reader.onload = async (e) => {
                 try {
                     const b64Text = e.target.result.trim();
-                    const binary = atob(b64Text);
-                    const compBytes = new Uint8Array(binary.length);
-                    for (let i = 0; i < binary.length; i++) compBytes[i] = binary.charCodeAt(i);
+                    
+                    status.innerText = "Decoding text format natively...";
+                    const res = await fetch(`data:application/octet-stream;base64,${b64Text}`);
+                    const compBuffer = await res.arrayBuffer();
+                    const compBytes = new Uint8Array(compBuffer);
                     
                     status.innerText = "Decompressing archive components...";
-                    const decompStream = new Blob([compBytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+                    const decompStream = new Blob([compBytes]).stream().pipeThrough(new DecompressionStream('deflate'));
                     const decompBuffer = await new Response(decompStream).arrayBuffer();
                     const masterArray = new Uint8Array(decompBuffer);
+                    let view = new DataView(masterArray.buffer);
                     
-                    // Parse original header blocks
-                    let pipelineCursor = 0;
-                    let headerString = "";
-                    while (pipelineCursor < masterArray.length) {
-                        const char = String.fromCharCode(masterArray[pipelineCursor++]);
-                        if (char === '|') break;
-                        headerString += char;
-                    }
+                    const fileCount = view.getUint32(0, false);
+                    let offset = 4;
                     
-                    const filesMeta = headerString.split(';');
-                    filesMeta.forEach(meta => {
-                        if (!meta) return;
-                        const [name, sizeStr] = meta.split(':');
-                        const size = parseInt(sizeStr, 10);
+                    status.innerText = "Extracting files and paths to your machine...";
+                    
+                    for (let i = 0; i < fileCount; i++) {
+                        const pathLen = view.getUint32(offset, false);
+                        offset += 4;
                         
-                        const fileBytes = masterArray.subarray(pipelineCursor, pipelineCursor + size);
-                        pipelineCursor += size;
+                        const pathBytes = masterArray.subarray(offset, offset + pathLen);
+                        const structuralPath = new TextDecoder().decode(pathBytes);
+                        offset += pathLen;
                         
-                        // Download the individual restored file
+                        const fileLen = view.getUint32(offset, false);
+                        offset += 4;
+                        
+                        const fileBytes = masterArray.subarray(offset, offset + fileLen);
+                        offset += fileLen;
+                        
                         const anchor = document.createElement('a');
                         anchor.href = URL.createObjectURL(new Blob([fileBytes], {type: "application/octet-stream"}));
-                        anchor.download = name;
+                        
+                        // UPGRADED: Chrome safely handles subfolder strings via download naming attributes
+                        anchor.download = structuralPath;
                         anchor.click();
-                    });
+                    }
                     
-                    status.innerText = "Success! All files unpackaged individually.";
+                    status.innerText = "Success! Folder structure unpacked completely.";
                 } catch(err) {
-                    alert("Error: Malformed file archive or text structural sequence.");
+                    alert("Error processing the data stream.");
                     status.innerText = "";
                 }
             };
