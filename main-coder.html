@@ -52,41 +52,56 @@
             const status = document.getElementById('packStatus');
             status.innerText = "Processing stream...";
             
-            let headerParts = [];
-            let fileBuffers = [];
+            let fileEntries = [];
+            let totalPayloadSize = 0;
             
+            // Step 1: Read all files and compile metadata size
             for (let file of filesToPack) {
-                // Pre-check size limits aggressively
                 if (file.size > 2 * 1024 * 1024 * 1024) {
                     alert(`Error: ${file.name} is too large. Choose files under 2 GB.`);
                     status.innerText = "";
                     return;
                 }
                 const buf = await file.arrayBuffer();
-                headerParts.push(`${file.name}:${buf.byteLength}`);
-                fileBuffers.push(new Uint8Array(buf));
+                const fileBytes = new Uint8Array(buf);
+                const nameBytes = new TextEncoder().encode(file.name);
+                
+                fileEntries.push({
+                    nameBytes: nameBytes,
+                    fileBytes: fileBytes,
+                    size: fileBytes.length
+                });
+                
+                // Each metadata entry takes: 4 bytes (name len) + name string bytes + 4 bytes (file len) + file content bytes
+                totalPayloadSize += 4 + nameBytes.length + 4 + fileBytes.length;
             }
             
-            const headerString = headerParts.join('透') + '型';
-            const headerBytes = new TextEncoder().encode(headerString);
+            // Add 4 bytes at the very beginning to store the total number of files packed
+            let masterArray = new Uint8Array(4 + totalPayloadSize);
+            let view = new DataView(masterArray.buffer);
             
-            let totalSize = headerBytes.length;
-            fileBuffers.forEach(b => totalSize += b.length);
+            // Set number of files
+            view.setUint32(0, fileEntries.length, false);
+            let offset = 4;
             
-            if (totalSize > 2 * 1024 * 1024 * 1024) {
-                alert("Error: Total archive size exceeds the 2 GB limit.");
-                status.innerText = "";
-                return;
+            // Step 2: Write pure binary header segments alongside data blocks
+            for (let entry of fileEntries) {
+                // Write Name Length (4 bytes)
+                view.setUint32(offset, entry.nameBytes.length, false);
+                offset += 4;
+                
+                // Write Name String
+                masterArray.set(entry.nameBytes, offset);
+                offset += entry.nameBytes.length;
+                
+                // Write File Content Length (4 bytes)
+                view.setUint32(offset, entry.size, false);
+                offset += 4;
+                
+                // Write File Bytes
+                masterArray.set(entry.fileBytes, offset);
+                offset += entry.size;
             }
-
-            let masterArray = new Uint8Array(totalSize);
-            masterArray.set(headerBytes, 0);
-            
-            let offset = headerBytes.length;
-            fileBuffers.forEach(b => {
-                masterArray.set(b, offset);
-                offset += b.length;
-            });
 
             status.innerText = "Compressing blocks...";
             
@@ -124,29 +139,38 @@
                     const decompStream = new Blob([compBytes]).stream().pipeThrough(new DecompressionStream('gzip'));
                     const decompBuffer = await new Response(decompStream).arrayBuffer();
                     const masterArray = new Uint8Array(decompBuffer);
+                    let view = new DataView(masterArray.buffer);
                     
-                    let pipelineCursor = 0;
-                    let headerString = "";
-                    while (pipelineCursor < masterArray.length) {
-                        const char = String.fromCharCode(masterArray[pipelineCursor++]);
-                        if (char === '型') break;
-                        headerString += char;
-                    }
+                    // Parse total file count from first 4 bytes
+                    const fileCount = view.getUint32(0, false);
+                    let offset = 4;
                     
-                    const filesMeta = headerString.split('透');
-                    filesMeta.forEach(meta => {
-                        if (!meta) return;
-                        const [name, sizeStr] = meta.split(':');
-                        const size = parseInt(sizeStr, 10);
+                    status.innerText = "Extracting binary sequences...";
+                    
+                    for (let i = 0; i < fileCount; i++) {
+                        // Read name length
+                        const nameLen = view.getUint32(offset, false);
+                        offset += 4;
                         
-                        const fileBytes = masterArray.subarray(pipelineCursor, pipelineCursor + size);
-                        pipelineCursor += size;
+                        // Read name string
+                        const nameBytes = masterArray.subarray(offset, offset + nameLen);
+                        const name = new TextDecoder().decode(nameBytes);
+                        offset += nameLen;
                         
+                        // Read file data length
+                        const fileLen = view.getUint32(offset, false);
+                        offset += 4;
+                        
+                        // Extract precise file data subset slice
+                        const fileBytes = masterArray.subarray(offset, offset + fileLen);
+                        offset += fileLen;
+                        
+                        // Trigger individual item download anchor
                         const anchor = document.createElement('a');
                         anchor.href = URL.createObjectURL(new Blob([fileBytes], {type: "application/octet-stream"}));
                         anchor.download = name;
                         anchor.click();
-                    });
+                    }
                     
                     status.innerText = "Success. All contents extracted.";
                 } catch(err) {
@@ -154,7 +178,7 @@
                     status.innerText = "";
                 }
             };
-            reader.readAsText(fileToUnpack[0]);
+            reader.readAsText(fileToUnpack);
         });
     </script>
 </body>
