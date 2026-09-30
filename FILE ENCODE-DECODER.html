@@ -8,7 +8,8 @@
         .box { border: 2px dashed #bbb; padding: 30px; background: white; border-radius: 8px; text-align: center; margin-bottom: 20px; }
         button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1em; }
         button:hover { background: #0056b3; }
-        input[type="file"] { display: block; margin: 15px auto; }
+        input[type="file"], select, input[type="text"] { display: block; margin: 15px auto; padding: 8px; box-sizing: border-box; }
+        input[type="text"] { width: 60%; max-width: 300px; border: 1px solid #ccc; border-radius: 4px; }
         .status { font-weight: bold; margin-top: 15px; color: #28a745; }
     </style>
 </head>
@@ -19,9 +20,20 @@
     <!-- PACK SECTION -->
     <div class="box">
         <h2>1. Pack Any File(s) or Folders to Text</h2>
-        <p>Select a video, image, exe, text asset, or an entire folder:</p>
-        <!-- UPGRADED: Added webkitdirectory and directory to capture full folder structures -->
-        <input type="file" id="fileInput" multiple webkitdirectory directory>
+        <p>Select what you want to pack:</p>
+        
+        <select id="uploadType">
+            <option value="files">Individual File(s)</option>
+            <option value="folder">An Entire Folder</option>
+        </select>
+
+        <div id="pickerContainer">
+            <input type="file" id="fileInput" multiple>
+        </div>
+
+        <!-- NEW FEATURE: Rename output text file field -->
+        <input type="text" id="archiveNameInput" placeholder="Custom Archive Name (Optional)" accept-charset="UTF-8">
+
         <button id="packBtn" style="display:none;">Pack to Text File</button>
         <div id="packStatus" class="status"></div>
     </div>
@@ -38,17 +50,40 @@
         let filesToPack = null;
         let fileToUnpack = null;
 
-        document.getElementById('fileInput').addEventListener('change', (e) => {
+        document.getElementById('uploadType').addEventListener('change', function(e) {
+            const container = document.getElementById('pickerContainer');
+            container.innerHTML = ''; 
+            
+            const newInput = document.createElement('input');
+            newInput.type = 'file';
+            newInput.id = 'fileInput';
+            
+            if (e.target.value === 'folder') {
+                newInput.setAttribute('webkitdirectory', '');
+                newInput.setAttribute('directory', '');
+            } else {
+                newInput.setAttribute('multiple', '');
+            }
+            
+            newInput.addEventListener('change', handleFileSelection);
+            container.appendChild(newInput);
+            
+            filesToPack = null;
+            document.getElementById('packBtn').style.display = 'none';
+        });
+
+        function handleFileSelection(e) {
             filesToPack = e.target.files;
             document.getElementById('packBtn').style.display = filesToPack.length ? 'inline-block' : 'none';
-        });
+        }
+
+        document.getElementById('fileInput').addEventListener('change', handleFileSelection);
 
         document.getElementById('textInput').addEventListener('change', (e) => {
             fileToUnpack = e.target.files;
             document.getElementById('unpackBtn').style.display = fileToUnpack ? 'inline-block' : 'none';
         });
 
-        // Crash-proof native conversion using browser background streams
         function bytesToBase64Native(blob) {
             return new Promise((resolve) => {
                 const reader = new FileReader();
@@ -63,7 +98,7 @@
         // ENCODER
         document.getElementById('packBtn').addEventListener('click', async () => {
             const status = document.getElementById('packStatus');
-            status.innerText = "Processing folder layout into binary stream...";
+            status.innerText = "Processing selection into binary stream...";
             
             let fileEntries = [];
             let totalPayloadSize = 0;
@@ -72,7 +107,6 @@
                 const buf = await file.arrayBuffer();
                 const fileBytes = new Uint8Array(buf);
                 
-                // UPGRADED: Uses webkitRelativePath to capture full folders, falls back to name for single files
                 const structuralPath = file.webkitRelativePath || file.name;
                 const pathBytes = new TextEncoder().encode(structuralPath);
                 
@@ -115,11 +149,21 @@
             const compressedBlob = new Blob([compBuffer]);
             const b64Text = await bytesToBase64Native(compressedBlob);
 
+            // Read the custom name from input field, remove invalid file characters, fallback if blank
+            let customName = document.getElementById('archiveNameInput').value.trim();
+            customName = customName.replace(/[\\/:*?"<>|]/g, ""); // sanitize filename
+            if (!customName) {
+                customName = "packed_archive";
+            }
+            if (!customName.endsWith(".txt")) {
+                customName += ".txt";
+            }
+
             const anchor = document.createElement('a');
             anchor.href = URL.createObjectURL(new Blob([b64Text], {type: "text/plain"}));
-            anchor.download = "packed_archive.txt";
+            anchor.download = customName;
             anchor.click();
-            status.innerText = "Done! Folder archive saved to your Downloads.";
+            status.innerText = `Done! Saved as "${customName}" to your Downloads.`;
         });
 
         // DECODER
@@ -146,7 +190,7 @@
                     const fileCount = view.getUint32(0, false);
                     let offset = 4;
                     
-                    status.innerText = "Extracting files and paths to your machine...";
+                    status.innerText = "Extracting contents to your machine...";
                     
                     for (let i = 0; i < fileCount; i++) {
                         const pathLen = view.getUint32(offset, false);
@@ -164,13 +208,11 @@
                         
                         const anchor = document.createElement('a');
                         anchor.href = URL.createObjectURL(new Blob([fileBytes], {type: "application/octet-stream"}));
-                        
-                        // UPGRADED: Chrome safely handles subfolder strings via download naming attributes
                         anchor.download = structuralPath;
                         anchor.click();
                     }
                     
-                    status.innerText = "Success! Folder structure unpacked completely.";
+                    status.innerText = "Success! Archive completely unpacked.";
                 } catch(err) {
                     alert("Error processing the data stream.");
                     status.innerText = "";
